@@ -1,3 +1,95 @@
+## 实践总结
+
+感谢 @Uchiha-Peng 提供的方案，安装过程没有任何问题，很顺利就完成了，然后就卡在了 `Start PXE over IPv4` 上。我实践中用的是 x86 的 macbook， `qemu@6.2.0` 和 `debian@11`，与目前这个方案差异比较大，遇到了很多问题，总结一下，方便大家继续实践。
+
+### 启动引导
+
+创建启动项时，这条命令怎么都不起作用。
+
+```
+efibootmgr -c -d /dev/sda -p 1 -L debian -l \EFI\debian\grubx64.efi
+```
+
+上一步执行的是 `\EFI\debian\grubaa64.efi` ，发现时这个 `.efi` 文件名字变了。
+
+于是先进入 linux，执行：
+
+```
+mount /dev/sda1 /mnt
+find /mnt
+```
+
+可以看到一系列 `.efi` 文件，具体是 `grubx64.efi` 还是 `grubaa64.efi` 就可以判断了。
+
+然后是反斜杠 `\` 的问题，我这里需要改成了 `\\`，不然识别不到。
+
+最后的命令变成了：
+
+```
+efibootmgr -c -d /dev/sda -p 1 -L debian -l \\EFI\\debian\\grubaa64.efi
+```
+
+设置错了可以删掉，`efibootmgr` 的简单命令，：
+
+```
+efibootmgr              # 当前状态
+efibootmgr -b 0000 -B   # 删除
+```
+
+### 桌面环境
+
+为了解决引导问题，选择安装时先不装桌面环境，解决第一个问题后，再装桌面环境。
+
+1. GNOME
+```
+apt install x-window-system-core # 安装X11视窗系统核心
+apt install gnome-core # 安装最基本的gnome图形相关软件
+init 6 # 设置系统为图形界面启动，该命令执行后系统会重启
+```
+
+2. Xfce
+```
+apt install task-xfce-desktop # 安装Xfce
+```
+
+3. 切换桌面
+```
+update-alternatives --config x-session-manager
+```
+
+### 键盘鼠标
+
+1. 键盘鼠标不能用
+
+我加了一行：
+
+```
+-usb -device usb-ehci -device usb-kbd -device usb-tablet
+```
+
+2. 鼠标不显示
+
+网上基本是加参数 `-show-cursor`，而我得到的却是 `invalid option`，原来qemu已经[在 6.0 废弃了这个参数](https://www.qemu.org/docs/master/about/removed-features.html#show-cursor-option-removed-in-6-0)，改用 `-display default,show-cursor=on` 实现。
+
+我最终的启动脚本为：
+
+```
+qemu-system-aarch64 \
+    -M virt -m 3G -cpu cortex-a72 -smp 2 \
+    -drive file=flash0.img,format=raw,if=pflash \
+    -drive file=flash1.img,format=raw,if=pflash \
+    -drive id=hd0,media=disk,if=none,file=debian.qcow2 \
+    -device virtio-scsi-pci -device scsi-hd,drive=hd0 \
+    -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 \
+    -device virtio-gpu-pci \
+    -usb -device usb-ehci -device usb-kbd -device usb-tablet \
+    -display default,show-cursor=on
+```
+
+## 原 README
+
+请通读后再动手。
+
 ## Why To Do?
 
 ### 1、我为什么要搞这个，能做什么
@@ -13,7 +105,7 @@
 
 ### 1、先决条件
 
-确保安装**qemu-system-aarch64**和**qemu-image**，推荐4.0以上版本，安装过程参见[QEMU官网](https://www.qemu.org/download/ "下载安装文件")
+确保安装**qemu-system-aarch64**和**qemu-image**，推荐 4.0 以上版本，安装过程参见[QEMU 官网](https://www.qemu.org/download/ "下载安装文件")
 
 ```
 qemu-system-aarch64 -version
@@ -29,11 +121,11 @@ qemu-img version 4.2.0 (v4.2.0-11797-g2890edc853-dirty)
 Copyright (c) 2003-2019 Fabrice Bellard and the QEMU Project developers
 ```
 
-### 2、下载系统镜像和所需UEFI引导文件
+### 2、下载系统镜像和所需 UEFI 引导文件
 
-1. 下载Ubuntu或Debian的arm64(aarch64)的iso文件，建议下载最新版的系统，不多赘述，这一步要是都搞不定，就别往下看了
+1. 下载 Ubuntu 或 Debian 的 arm64(aarch64)的 iso 文件，建议下载最新版的系统，不多赘述，这一步要是都搞不定，就别往下看了
 
-2. 从[Linux应用中心](https://pkgs.org/search/?q=qemu-efi-aarch64 "qemu-efi-aarch64")搜索**qemu-efi-aarch64**，下载对应发行版对应版本对的deb文件，用7zip等文件解压，拷贝出**QEMU_EFI.fd**文件
+2. 从[Linux 应用中心](https://pkgs.org/search/?q=qemu-efi-aarch64 "qemu-efi-aarch64")搜索**qemu-efi-aarch64**，下载对应发行版对应版本对的 deb 文件，用 7zip 等文件解压，拷贝出**QEMU_EFI.fd**文件
 
 ### 3、创建磁盘并开始安装
 
@@ -51,7 +143,7 @@ qemu-system-aarch64 ^
     -device virtio-scsi-pci -device scsi-hd,drive=hd0 ^
     -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 ^
     -monitor stdio
-    
+
  #on Linux terminal
  qemu-system-aarch64 \
     -M virt -m 3G -cpu cortex-a72 -smp 2 \
@@ -62,38 +154,36 @@ qemu-system-aarch64 ^
     -device virtio-scsi-pci -device scsi-hd,drive=hd0 \
     -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 \
     -nographic
-    
+
 #注意事项
 -monitor stdio是默认使用serial0控制台，在windows下请使用此项,如在linux下，请替换为-nographic，因为在Linux中存在键盘方向键无法使用的问题，十分不便
 
 如需要安装ubuntu-20.04-server-live-arm64，只需替换镜像文件和磁盘文件路径即可，另外，ubuntu 20.04及更新版本在Windows下安装会出现问题，建议在Linux下进行
-    
+
 ```
 
 参数说明
 
-| 参数                                                         | 值                                            | 含义                                                         |
-| ------------------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------ |
-| -M                                                           | virt                                          | 模拟的机器类型                                               |
-| -m                                                           | 3G                                            | 3GB RAM，还可以写3072或3072M                                 |
-| -cpu                                                         | cortex-a72                                    | 模拟的CPU类型，cortex-a72是ARMv8架构比较新的，性能比较强，也可以使用A57或A53 |
-| -smp                                                         | 2                                             | 模拟的CPU核心数                                              |
-| -bios                                                        | QEMU_EFI.fd                                   | uefi引导文件，目录可以改，文件名也可以改                     |
-| -drive id=cdrom,media=cdrom,if=none,file=ubuntuordebian.iso    -device virtio-scsi-device -device scsi-cd,drive=cdrom \ | debian-10.4.0-arm64-xfce.iso                  | 启动关盘镜像                                                 |
-| -drive id=hd0,media=disk,if=none,file=debian.qcow2   -device virtio-scsi-pci -device scsi-hd,drive=hd0 | debian.qcow2                                  | 磁盘，系统将会安装到这个磁盘中                               |
-| -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 | hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 | 端口转发，宿主机2222端口映射虚拟机22端口，6900对应5900，可按需更改 |
-|                                                              | -nographic                                    | 不使用qemu gui窗口                                           |
-|                                                              | -monitor stdio                                | 默认hi用qemu的serial0窗口                                    |
-|                                                              | -device virtio-gpu-pci                        | 用于显示带gui的操作系统，安装时不建议使用该选项，因为在Window和Linux下键盘鼠标都无法使用，安装完成后运行时可使用（ARM下官方推荐的两个显示设备之一） |
-|                                                              | -device ramfb                                 | 用于显示带gui的操作系统，安装时不建议使用该选项，因为在Window和Linux下键盘鼠标都无法使用，安装完成后运行时可使用（ARM下官方推荐的两个显示设备之一） |
+| 参数                                                                                                                  | 值                                            | 含义                                                                                                                                                       |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| -M                                                                                                                    | virt                                          | 模拟的机器类型                                                                                                                                             |
+| -m                                                                                                                    | 3G                                            | 3GB RAM，还可以写 3072 或 3072M                                                                                                                            |
+| -cpu                                                                                                                  | cortex-a72                                    | 模拟的 CPU 类型，cortex-a72 是 ARMv8 架构比较新的，性能比较强，也可以使用 A57 或 A53                                                                       |
+| -smp                                                                                                                  | 2                                             | 模拟的 CPU 核心数                                                                                                                                          |
+| -bios                                                                                                                 | QEMU_EFI.fd                                   | uefi 引导文件，目录可以改，文件名也可以改                                                                                                                  |
+| -drive id=cdrom,media=cdrom,if=none,file=ubuntuordebian.iso -device virtio-scsi-device -device scsi-cd,drive=cdrom \  | debian-10.4.0-arm64-xfce.iso                  | 启动关盘镜像                                                                                                                                               |
+| -drive id=hd0,media=disk,if=none,file=debian.qcow2 -device virtio-scsi-pci -device scsi-hd,drive=hd0                  | debian.qcow2                                  | 磁盘，系统将会安装到这个磁盘中                                                                                                                             |
+| -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900                                          | hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 | 端口转发，宿主机 2222 端口映射虚拟机 22 端口，6900 对应 5900，可按需更改                                                                                   |
+|                                                                                                                       | -nographic                                    | 不使用 qemu gui 窗口                                                                                                                                       |
+|                                                                                                                       | -monitor stdio                                | 默认 hi 用 qemu 的 serial0 窗口                                                                                                                            |
+|                                                                                                                       | -device virtio-gpu-pci                        | 用于显示带 gui 的操作系统，安装时不建议使用该选项，因为在 Window 和 Linux 下键盘鼠标都无法使用，安装完成后运行时可使用（ARM 下官方推荐的两个显示设备之一） |
+|                                                                                                                       | -device ramfb                                 | 用于显示带 gui 的操作系统，安装时不建议使用该选项，因为在 Window 和 Linux 下键盘鼠标都无法使用，安装完成后运行时可使用（ARM 下官方推荐的两个显示设备之一） |
 
+### 4、运行并添加 UEFI 启动项
 
+注意，真正的难题出现了，安装完成后，如果使用-bios QEMU_EFI.fd 启动，登陆时会按默认的 UEFI 启动项顺序启动，会出现` Start PXE over IPv4`等信息，无法启动进入系统。关于这个问题，Debian 官网有描述，参见[Debian 官网 Wiki](https://wiki.debian.org/UEFI#Booting_from_removable_media"debian uefi")，出现的原因，是因为原有的 UEFI 引导项没有从 grubaa64.efi 启动的，那我们需要新建一个引导项从 grubaa64.efi 启动。但是，由于-bios QEMU_EFI.fd 是只读的，我们即便本次新建了引导项，等关机后再次启动时，新增的 UEFI 引导项会丢失，官方提供了 pflash 来解决这问题，它是可读写的。我这里提供了几个 Demo 文件，可以让你直接启动到系统，但是仅适用于 Debian，如果是 ubuntu，你还需要自己动手。
 
-### 4、运行并添加UEFI启动项
-
-注意，真正的难题出现了，安装完成后，如果使用-bios QEMU_EFI.fd启动，登陆时会按默认的UEFI启动项顺序启动，会出现` Start PXE over IPv4`等信息，无法启动进入系统。关于这个问题，Debian官网有描述，参见[Debian官网Wiki](https://wiki.debian.org/UEFI#Booting_from_removable_media"debian uefi")，出现的原因，是因为原有的UEFI引导项没有从grubaa64.efi启动的，那我们需要新建一个引导项从grubaa64.efi启动。但是，由于-bios QEMU_EFI.fd是只读的，我们即便本次新建了引导项，等关机后再次启动时，新增的UEFI引导项会丢失，官方提供了pflash来解决这问题，它是可读写的。我这里提供了几个Demo文件，可以让你直接启动到系统，但是仅适用于Debian，如果是ubuntu，你还需要自己动手。
-
-首先，我们将QEMU_EFI.fd文件打包到img文件中，给64MB大小即可，在Linux下执行以下命令
+首先，我们将 QEMU_EFI.fd 文件打包到 img 文件中，给 64MB 大小即可，在 Linux 下执行以下命令
 
 ```
 dd if=/dev/zero of=flash0.img bs=1M count=64
@@ -101,7 +191,7 @@ dd if=QEMU_EFI.fd of=flash0.img conv=notrunc
 dd if=/dev/zero of=flash1.img bs=1M count=64
 ```
 
-在上一步中，会生成两个文件`flash0.img`和`flash1.img`，我们用pflash来启动
+在上一步中，会生成两个文件`flash0.img`和`flash1.img`，我们用 pflash 来启动
 
 ```
 #on Windows cmd
@@ -113,7 +203,7 @@ qemu-system-aarch64 ^
     -device virtio-scsi-pci -device scsi-hd,drive=hd0 ^
     -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 ^
     -monitor stdio
-    
+
  #on Linux terminal
  qemu-system-aarch64 \
     -M virt -m 3G -cpu cortex-a72 -smp 2 \
@@ -123,14 +213,14 @@ qemu-system-aarch64 ^
     -device virtio-scsi-pci -device scsi-hd,drive=hd0 \
     -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6900-:5900 \
     -nographic
-    
+
 #注意事项
 -monitor stdio是默认使用serial0控制台，在windows下请使用此项,如在linux下，请替换为-nographic，因为在Linux中存在键盘方向键无法使用的问题，十分不便
 
 如果安装了桌面环境，无论Windows还是Linux，请替换为-device virtio-gpu-pci 或 -device ramfb
 ```
 
-注意，因为我们还没有添加引导项，所以本次登陆时仍会出现` Start PXE over IPv4`等类息，此时我们在控制台输入以下内容(一个标点符号都不要少)，然后Enter，即可正常进入系统
+注意，因为我们还没有添加引导项，所以本次登陆时仍会出现` Start PXE over IPv4`等类息，此时我们在控制台输入以下内容(一个标点符号都不要少)，然后 Enter，即可正常进入系统
 
 ```
 #for debian
@@ -140,7 +230,7 @@ qemu-system-aarch64 ^
 \EFI\ubuntu\grubaa64.efi
 ```
 
-成功进入系统后，我们新增一个uefi启动选项，并设置为启动首选项，通过以下命令即可解决问题
+成功进入系统后，我们新增一个 uefi 启动选项，并设置为启动首选项，通过以下命令即可解决问题
 
 ```
 #for debian
@@ -158,7 +248,7 @@ BootOrder: 0007,0000,0001,0002,0003,0004,0005,0006
 Boot0000* UiApp
 Boot0001* UEFI Misc Device
 Boot0002* UEFI Misc Device 2
-Boot0003* UEFI QEMU QEMU HARDDISK 
+Boot0003* UEFI QEMU QEMU HARDDISK
 Boot0004* UEFI PXEv4 (MAC:525400123456)
 Boot0005* UEFI HTTPv4 (MAC:525400123456)
 Boot0006* EFI Internal Shell
